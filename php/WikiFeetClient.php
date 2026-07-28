@@ -34,13 +34,16 @@ class WikiFeetClient
 
     public const DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
+    private bool $isPersistentJar = false;
+
     public function __construct(
         ?string $email = null,
         ?string $password = null,
         string $domain = "wikifeet.com",
         ?string $proxy = null,
         string $userAgent = self::DEFAULT_USER_AGENT,
-        bool $isGuest = false
+        bool $isGuest = false,
+        ?string $cookieJarPath = null
     ) {
         $this->email = $email;
         $this->password = $password;
@@ -49,12 +52,18 @@ class WikiFeetClient
         $this->isGuest = $isGuest || (!$email && !$password);
         $this->proxy = $proxy;
 
-        $this->cookieJar = sys_get_temp_dir() . '/wf_cookie_' . md5(uniqid(rand(), true)) . '.txt';
+        if ($cookieJarPath) {
+            $this->cookieJar = $cookieJarPath;
+            $this->isPersistentJar = true;
+        } else {
+            $this->cookieJar = sys_get_temp_dir() . '/wf_cookie_' . md5(uniqid(rand(), true)) . '.txt';
+            $this->isPersistentJar = false;
+        }
     }
 
     public function __destruct()
     {
-        if (file_exists($this->cookieJar)) {
+        if (!$this->isPersistentJar && file_exists($this->cookieJar)) {
             @unlink($this->cookieJar);
         }
     }
@@ -652,6 +661,20 @@ class WikiFeetClient
             }
         }
         return $msgs;
+    }
+
+    public function sendGuildChat(string $message): array
+    {
+        if ($this->isGuest) {
+            throw new AuthenticationException("Sending Guild chat messages requires an authenticated User session.");
+        }
+        if (empty(trim($message))) {
+            throw new InvalidArgumentException("Message text cannot be empty.");
+        }
+
+        $url = "https://{$this->domain}/api/gcsend";
+        $res = $this->request('POST', $url, ['message' => trim($message)]);
+        return $this->verifyApiResponse($res, "Sending Guild chat message");
     }
 
     private function getGenderCode(): string

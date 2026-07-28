@@ -662,12 +662,37 @@ class GuildMessage:
         self.user_id: int = int(data.get("uid", 0))
         self.author: str = str(data.get("nickname") or data.get("author", "Anonymous"))
         self.text: str = str(data.get("message") or data.get("comment", ""))
+        self.avatar_id: int = int(data.get("avatar", 0))
+        self.secago: int = int(data.get("secago", 0))
         self.timestamp: str = str(data.get("timestamp", ""))
         self.user_title: str = str(data.get("title", ""))
+        self.badge: Optional[str] = data.get("badge")
+
+    @property
+    def avatar_url(self) -> Optional[str]:
+        """Returns standard avatar URL or None if user has no avatar set."""
+        if self.avatar_id > 0:
+            return f"https://wikifeet.com/avatars/{self.avatar_id}.jpg"
+        return None
+
+    @property
+    def formatted_time(self) -> str:
+        """Returns relative human-readable time string (e.g. '5 mins ago')."""
+        if self.secago <= 0:
+            return self.timestamp or "Just now"
+        s = self.secago
+        if s < 60:
+            return f"{s}s ago"
+        elif s < 3600:
+            return f"{s // 60}m ago"
+        elif s < 86400:
+            return f"{s // 3600}h ago"
+        else:
+            return f"{s // 86400}d ago"
 
     def __repr__(self) -> str:
         snippet = self.text[:30] + "..." if len(self.text) > 30 else self.text
-        return f"<GuildMessage ID={self.idx} author='{self.author}' text='{snippet}'>"
+        return f"<GuildMessage ID={self.idx} author='{self.author}' time='{self.formatted_time}' text='{snippet}'>"
 
 
 class Guild:

@@ -711,6 +711,25 @@ class WikiFeetClient:
 
         return [GuildMessage(m) for m in raw_chat if isinstance(m, dict)]
 
+    def send_guild_chat(self, message: str) -> Dict[str, Any]:
+        """
+        Sends a real-time message to the Guild chat via POST /api/gcsend.
+
+        :param message: Message text string.
+        :return: Response JSON containing process status.
+        """
+        if self.is_guest:
+            raise AuthenticationError("Sending Guild chat messages requires an authenticated User session.")
+
+        if not message or not str(message).strip():
+            raise ValueError("Message text cannot be empty.")
+
+        url = f"https://{self.domain}/api/gcsend"
+        files = {"message": (None, str(message).strip())}
+
+        resp = self.session.post(url, files=files, timeout=10)
+        return self._verify_api_response(resp, action_name="Sending Guild chat message")
+
     def _get_gender_code(self) -> str:
         """Returns gender string parameter for backlog calls based on client domain."""
         dom = self.domain.lower()
