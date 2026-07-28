@@ -85,7 +85,9 @@ class WikiFeetClient
         ?string $proxy = null,
         string $userAgent = self::DEFAULT_USER_AGENT
     ): self {
-        return new self($email, $password, $domain, $proxy, $userAgent, false);
+        $client = new self($email, $password, $domain, $proxy, $userAgent, false);
+        $client->login();
+        return $client;
     }
 
     public function setProxy(?string $proxyUrl): void
@@ -101,6 +103,54 @@ class WikiFeetClient
     public function isLoggedIn(): bool
     {
         return $this->loggedIn && !$this->isGuest;
+    }
+
+    public function login(?string $email = null, ?string $password = null): array
+    {
+        $userEmail = $email ?? $this->email;
+        $userPass = $password ?? $this->password;
+
+        if (!$userEmail || !$userPass) {
+            throw new InvalidArgumentException("Email and password are required to login.");
+        }
+
+        $url = "https://{$this->domain}/api/signin";
+        $res = $this->request('POST', $url, [
+            'stype' => '0',
+            'email' => trim($userEmail),
+            'password' => $userPass
+        ]);
+
+        $data = $this->verifyApiResponse($res, "User signin");
+
+        $sessToken = null;
+        if (is_array($data)) {
+            if (count($data) >= 3 && $data[0] === 'render' && $data[1] === 'errorlabel') {
+                throw new AuthenticationException("Login failed: {$data[2]}");
+            }
+            foreach ($data as $item) {
+                if (is_array($item)) {
+                    if (count($item) >= 3 && $item[0] === 'render' && $item[1] === 'errorlabel') {
+                        throw new AuthenticationException("Login failed: {$item[2]}");
+                    }
+                    if (count($item) >= 2 && $item[0] === 'session') {
+                        $sessToken = $item[1];
+                    }
+                }
+            }
+        }
+
+        if ($sessToken) {
+            $cookieLine = "# Netscape HTTP Cookie File\n.{$this->domain}\tTRUE\t/\tFALSE\t0\tsession\t{$sessToken}\n";
+            file_put_contents($this->cookieJar, $cookieLine, FILE_APPEND);
+        }
+
+        $this->email = $userEmail;
+        $this->password = $userPass;
+        $this->isGuest = false;
+        $this->loggedIn = true;
+
+        return $data;
     }
 
     private function request(string $method, string $url, array $postFields = [], array $headers = []): array
@@ -197,8 +247,8 @@ class WikiFeetClient
         if (str_starts_with($celebritySlug, "http://") || str_starts_with($celebritySlug, "https://")) {
             $url = $celebritySlug;
         } else {
-            $slug = ltrim($celebritySlug, "/");
-            $url = "https://{$this->domain}/{$slug}";
+            $slug = str_replace(' ', '_', ltrim($celebritySlug, "/"));
+            $url = "https://{$this->domain}/" . rawurlencode($slug);
         }
 
         $res = $this->request('GET', $url);

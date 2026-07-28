@@ -54,6 +54,12 @@ class WikiFeetClient:
         if proxy:
             self.set_proxy(proxy)
 
+        if not self.is_guest and self.email and self.password:
+            try:
+                self.login()
+            except Exception:
+                pass
+
     def _configure_session(self) -> None:
         """Sets default browser-like headers on the requests session."""
         self.session.headers.update({
@@ -88,7 +94,10 @@ class WikiFeetClient:
         user_agent: str = DEFAULT_USER_AGENT
     ) -> "WikiFeetClient":
         """Factory method to create an authenticated User client bound to a specific domain."""
-        return cls(email=email, password=password, domain=domain, proxy=proxy, user_agent=user_agent, is_guest=False)
+        client = cls(email=email, password=password, domain=domain, proxy=proxy, user_agent=user_agent, is_guest=False)
+        if not client.is_logged_in:
+            client.login()
+        return client
 
     @property
     def proxy(self) -> Optional[str]:
@@ -114,6 +123,54 @@ class WikiFeetClient:
         """Returns True if the client is authenticated as a User."""
         return self._logged_in and not self.is_guest
 
+    def login(self, email: Optional[str] = None, password: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Authenticates session as a registered User via POST /api/signin.
+
+        :param email: User email address (defaults to self.email).
+        :param password: User password (defaults to self.password).
+        :return: Response JSON containing session details.
+        """
+        user_email = email or self.email
+        user_pass = password or self.password
+
+        if not user_email or not user_pass:
+            raise ValueError("Email and password are required to login.")
+
+        url = f"https://{self.domain}/api/signin"
+        files = {
+            "stype": (None, "0"),
+            "email": (None, str(user_email).strip()),
+            "password": (None, str(user_pass))
+        }
+
+        resp = self.session.post(url, files=files, timeout=15)
+        data = self._verify_api_response(resp, action_name="User signin")
+
+        # Check render error pattern or session token payload
+        sess_token = None
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, list):
+                    if len(item) >= 3 and item[0] == "render" and item[1] == "errorlabel":
+                        raise AuthenticationError(f"Login failed: {item[2]}")
+                    elif len(item) >= 2 and item[0] == "session":
+                        sess_token = item[1]
+                elif item == "errorlabel" and len(data) >= 3:
+                    raise AuthenticationError(f"Login failed: {data[2]}")
+
+        if sess_token:
+            self.session.cookies.set("session", sess_token, domain=self.domain)
+            if "wikifeet.com" in self.domain:
+                self.session.cookies.set("session", sess_token, domain=".wikifeet.com")
+
+        self.email = user_email
+        self.password = user_pass
+        self.is_guest = False
+        self._logged_in = True
+
+        return data
+
     def __repr__(self) -> str:
         mode = "Guest" if self.is_guest else f"User({self.email})"
         return f"<WikiFeetClient domain='{self.domain}' mode={mode} logged_in={self.is_logged_in}>"
@@ -128,7 +185,7 @@ class WikiFeetClient:
         if celebrity_slug.startswith("http://") or celebrity_slug.startswith("https://"):
             url = celebrity_slug
         else:
-            slug = celebrity_slug.lstrip("/")
+            slug = celebrity_slug.lstrip("/").strip().replace(" ", "_")
             url = f"https://{self.domain}/{slug}"
 
         resp = self.session.get(url, timeout=15)
